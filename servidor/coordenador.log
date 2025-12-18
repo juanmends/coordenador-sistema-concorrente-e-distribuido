@@ -1,0 +1,22 @@
+=================================================
+LOG DO COORDENADOR - Exclusão Mútua Distribuída
+=================================================
+
+2025-12-17 22:02:39.591 | RECV | REQUEST | Processo 1
+2025-12-17 22:02:39.591 | RECV | REQUEST | Processo 3
+2025-12-17 22:02:39.591 | RECV | REQUEST | Processo 2
+2025-12-17 22:02:39.600 | SEND | GRANT   | Processo 1
+2025-12-17 22:02:39.609 | RECV | REQUEST | Processo 4
+2025-12-17 22:02:39.630 | RECV | REQUEST | Processo 5
+2025-12-17 22:02:41.621 | RECV | RELEASE | Processo 1
+2025-12-17 22:02:41.621 | RECV | REQUEST | Processo 1
+2025-12-17 22:02:41.629 | SEND | GRANT   | Processo 3
+2025-12-17 22:02:43.642 | RECV | RELEASE | Processo 3
+2025-12-17 22:02:43.642 | RECV | REQUEST | Processo 3
+2025-12-17 22:02:43.651 | SEND | GRANT   | Processo 2
+2025-12-17 22:02:45.663 | RECV | RELEASE | Processo 2
+2025-12-17 22:02:45.663 | RECV | REQUEST | Processo 2
+2025-12-17 22:02:45.670 | SEND | GRANT   | Processo 4
+2025-12-17 22:02:47.690 | RECV | RELEASE | Processo 4
+2025-12-17 22:02:47.690 | RECV | REQUEST | Processo 4
+2025-12-17 22:02:47.697 | SEND | GRANT   | Processo 5

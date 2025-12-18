@@ -193,11 +193,51 @@ func parse_mensagem(buffer []byte) (tipo_msg string, IDprocesso int, err error) 
 	return tipo_msg, IDprocesso, nil
 }
 
+/////TENTAR CONCEDER ACESSO (NOVA FUNÇÃO - CHAVE DA CORREÇÃO)
+
+func tentar_conceder_acesso() {
+	mu_atual.Lock()
+	defer mu_atual.Unlock()
+
+	// Verifica se região crítica está livre E há processos na fila
+	if processo_atual == -1 && !fila.esta_vazia() {
+		IDprocesso, ok := fila.remover()
+
+		if ok {
+			processo_atual = IDprocesso
+
+			mu_connections.RLock()
+			conn, existe := connections[IDprocesso]
+			mu_connections.RUnlock()
+
+			if existe {
+				if err := enviar_mensagem(conn, "GRANT", IDprocesso); err != nil {
+					log.Printf("Erro ao enviar GRANT para processo %d: %v", IDprocesso, err)
+					// Se falhar, libera a região crítica
+					processo_atual = -1
+				} else {
+					mu_estatisticas.Lock()
+					estatisticas[IDprocesso]++
+					mu_estatisticas.Unlock()
+				}
+			} else {
+				// Conexão não existe, libera a região
+				processo_atual = -1
+			}
+		}
+	}
+}
+
 /////PROCESSAR MSG
 
 func processar_request(IDprocesso int) {
 	registrar_log("REQUEST", IDprocesso, "RECV")
+	
+	// Adiciona na fila
 	fila.adicionar(IDprocesso)
+	
+	// ✅ CORREÇÃO: Verifica imediatamente se pode conceder acesso
+	tentar_conceder_acesso()
 }
 
 func processar_release(IDprocesso int) {
@@ -208,46 +248,9 @@ func processar_release(IDprocesso int) {
 		processo_atual = -1
 	}
 	mu_atual.Unlock()
-}
 
-/////PROCESSAR FILA
-
-func processar_fila_loop() {
-	for {
-		mu_atual.Lock()
-
-		if processo_atual == -1 && !fila.esta_vazia() {
-			IDprocesso, ok := fila.remover()
-
-			if ok {
-				processo_atual = IDprocesso
-				mu_atual.Unlock()
-
-				mu_connections.RLock()
-				conn, existe := connections[IDprocesso]
-				mu_connections.RUnlock()
-
-				if existe {
-					if err := enviar_mensagem(conn, "GRANT", IDprocesso); err != nil {
-						log.Printf("Erro ao enviar GRANT para processo %d: %v", IDprocesso, err)
-
-						mu_atual.Lock()
-						processo_atual = -1
-						mu_atual.Unlock()
-					} else {
-						mu_estatisticas.Lock()
-						estatisticas[IDprocesso]++
-						mu_estatisticas.Unlock()
-					}
-				}
-				continue
-			}
-		}
-
-		mu_atual.Unlock()
-
-		time.Sleep(10 * time.Millisecond)
-	}
+	// ✅ CORREÇÃO: Após liberar, tenta conceder para o próximo da fila
+	tentar_conceder_acesso()
 }
 
 /////ATENDER PROCESSO
@@ -376,7 +379,8 @@ func main() {
 
 	fila = nova_fila()
 
-	go processar_fila_loop()
+	// ✅ CORREÇÃO: Removido o processar_fila_loop() - não é mais necessário!
+	// A verificação agora acontece de forma síncrona quando REQUEST chega ou RELEASE é feito
 
 	go interface_terminal()
 
