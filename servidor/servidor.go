@@ -1,3 +1,4 @@
+
 package main
 
 import (
@@ -11,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"math/rand"
 )
 
 /////STRUCTS
@@ -66,8 +68,15 @@ func nova_fila() *Fila {
 func (f *Fila) adicionar(IDprocesso int) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+
+	for e := f.lista.Front(); e != nil; e = e.Next() {
+		if e.Value.(int) == IDprocesso {
+			return // já está na fila
+		}
+	}
 	f.lista.PushBack(IDprocesso)
 }
+
 
 func (f *Fila) remover() (int, bool) { //retorna o id do processo removido (int) e diz se removeu algum elemento (bool)
 	f.mu.Lock()
@@ -193,40 +202,69 @@ func parse_mensagem(buffer []byte) (tipo_msg string, IDprocesso int, err error) 
 	return tipo_msg, IDprocesso, nil
 }
 
-/////TENTAR CONCEDER ACESSO (NOVA FUNÇÃO - CHAVE DA CORREÇÃO)
+func (f *Fila) remover_aleatorio() (int, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 
+	if f.lista.Len() == 0 {
+		return 0, false
+	}
+
+	// índice aleatório
+	idx := rand.Intn(f.lista.Len())
+
+	elem := f.lista.Front()
+	for i := 0; i < idx; i++ {
+		elem = elem.Next()
+	}
+
+	IDprocesso := f.lista.Remove(elem).(int)
+	return IDprocesso, true
+}
+
+
+/////TENTAR CONCEDER ACESSO (NOVA FUNÇÃO - CHAVE DA CORREÇÃO)
 func tentar_conceder_acesso() {
 	mu_atual.Lock()
 	defer mu_atual.Unlock()
 
-	// Verifica se região crítica está livre E há processos na fila
-	if processo_atual == -1 && !fila.esta_vazia() {
-		IDprocesso, ok := fila.remover()
-
-		if ok {
-			processo_atual = IDprocesso
-
-			mu_connections.RLock()
-			conn, existe := connections[IDprocesso]
-			mu_connections.RUnlock()
-
-			if existe {
-				if err := enviar_mensagem(conn, "GRANT", IDprocesso); err != nil {
-					log.Printf("Erro ao enviar GRANT para processo %d: %v", IDprocesso, err)
-					// Se falhar, libera a região crítica
-					processo_atual = -1
-				} else {
-					mu_estatisticas.Lock()
-					estatisticas[IDprocesso]++
-					mu_estatisticas.Unlock()
-				}
-			} else {
-				// Conexão não existe, libera a região
-				processo_atual = -1
-			}
-		}
+	// Região crítica livre e fila não vazia
+	if processo_atual != -1 || fila.esta_vazia() {
+		return
 	}
+
+	// 🔀 Delay aleatório (0–500 ms) para evitar ordem previsível
+	delay := time.Duration(rand.Intn(500)) * time.Millisecond
+	time.Sleep(delay)
+
+	IDprocesso, ok := fila.remover_aleatorio()
+	if !ok {
+		return
+	}
+
+	processo_atual = IDprocesso
+
+	mu_connections.RLock()
+	conn, existe := connections[IDprocesso]
+	mu_connections.RUnlock()
+
+	if !existe {
+		processo_atual = -1
+		return
+	}
+
+	if err := enviar_mensagem(conn, "GRANT", IDprocesso); err != nil {
+		log.Printf("Erro ao enviar GRANT para processo %d: %v", IDprocesso, err)
+		processo_atual = -1
+		return
+	}
+
+	mu_estatisticas.Lock()
+	estatisticas[IDprocesso]++
+	mu_estatisticas.Unlock()
 }
+
+
 
 /////PROCESSAR MSG
 
@@ -376,7 +414,7 @@ func interface_terminal() {
 
 func main() {
 	fmt.Println("Iniciando Coordenador...")
-
+	  rand.Seed(time.Now().UnixNano())
 	fila = nova_fila()
 
 	// ✅ CORREÇÃO: Removido o processar_fila_loop() - não é mais necessário!

@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"math/rand"
 	"net"
 	"os"
 	"strconv"
@@ -10,56 +11,80 @@ import (
 	"time"
 )
 
-func enviar_mensagem(conn net.Conn, tipo_msg string, IDprocesso int) {
+const F = 10 // tamanho fixo da mensagem
+
+// ----------------------
+// Enviar mensagem
+// ----------------------
+func enviar_mensagem(conn net.Conn, tipo_msg string, IDprocesso int) error {
 	var IDmsg string
+
 	switch tipo_msg {
 	case "REQUEST":
 		IDmsg = "1"
 	case "RELEASE":
 		IDmsg = "3"
+	default:
+		return fmt.Errorf("tipo de mensagem inválido")
 	}
 
-	msg := fmt.Sprintf("%s|%d|000000", IDmsg, IDprocesso)
+	msg := fmt.Sprintf("%s|%d|", IDmsg, IDprocesso)
+	for len(msg) < F {
+		msg += "0"
+	}
 
-	conn.Write([]byte(msg))
+	_, err := conn.Write([]byte(msg[:F]))
+	return err
 }
 
+// ----------------------
+// Aguardar GRANT
+// ----------------------
 func aguardar_grant(conn net.Conn) error {
-	buffer := make([]byte, 10)
+	buffer := make([]byte, F)
 
 	n, err := conn.Read(buffer)
 	if err != nil {
-		return fmt.Errorf("Erro ao ler %v", err)
+		return fmt.Errorf("erro ao ler GRANT: %v", err)
 	}
 
 	msg := strings.TrimRight(string(buffer[:n]), "0")
-
 	partes := strings.Split(msg, "|")
 
 	if len(partes) < 1 || partes[0] != "2" {
-		return fmt.Errorf("Mensagem não é um GRANT %v", msg)
-	} else {
-		fmt.Printf("GRANT recebido!")
-		return nil
+		return fmt.Errorf("mensagem não é GRANT: %s", msg)
 	}
 
+	fmt.Println("GRANT recebido")
+	return nil
 }
 
+// ----------------------
+// Região crítica
+// ----------------------
 func regiao_critica(IDprocesso int) {
-	file, err_arq := os.OpenFile("resultado.txt", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err_arq != nil {
-		log.Println(err_arq)
+	file, err := os.OpenFile(
+		"resultado.txt",
+		os.O_APPEND|os.O_CREATE|os.O_WRONLY,
+		0644,
+	)
+	if err != nil {
+		log.Println(err)
 		return
 	}
+	defer file.Close()
 
 	timestamp := time.Now().Format("2006-01-02 15:04:05.000")
-	linha := fmt.Sprintf("%d %s\n", IDprocesso, timestamp)
+	linha := fmt.Sprintf("Processo %d entrou na RC em %s\n", IDprocesso, timestamp)
 	file.WriteString(linha)
 
-	file.Close()
+	// Simula tempo na região crítica
 	time.Sleep(2 * time.Second)
 }
 
+// ----------------------
+// MAIN
+// ----------------------
 func main() {
 
 	if len(os.Args) < 2 {
@@ -71,27 +96,41 @@ func main() {
 		log.Fatal("ID deve ser um número")
 	}
 
+	// Inicializa aleatoriedade (ESSENCIAL)
+	rand.Seed(time.Now().UnixNano())
+
 	conn, err := net.Dial("tcp", "localhost:8080")
 	if err != nil {
-		log.Fatal("Erro ao conectar", err)
+		log.Fatal("Erro ao conectar ao coordenador:", err)
 	}
-
 	defer conn.Close()
 
-	r := 5
-	for i := 0; i < r; i++ {
+	const repeticoes = 5
 
-		enviar_mensagem(conn, "REQUEST", IDprocesso)
+	for i := 0; i < repeticoes; i++ {
 
-		resposta := aguardar_grant(conn)
-
-		if resposta != nil {
-			log.Printf("Erro ao aguardar GRANT: %v", resposta)
+		// REQUEST
+		if err := enviar_mensagem(conn, "REQUEST", IDprocesso); err != nil {
+			log.Println("Erro ao enviar REQUEST:", err)
 			continue
 		}
 
+		// Aguarda GRANT
+		if err := aguardar_grant(conn); err != nil {
+			log.Println(err)
+			continue
+		}
+
+		// Região crítica
 		regiao_critica(IDprocesso)
 
-		enviar_mensagem(conn, "RELEASE", IDprocesso)
+		// RELEASE
+		if err := enviar_mensagem(conn, "RELEASE", IDprocesso); err != nil {
+			log.Println("Erro ao enviar RELEASE:", err)
+			continue
+		}
+
+		// 🔀 Delay aleatório ANTES de um novo REQUEST
+		time.Sleep(time.Duration(rand.Intn(1000)) * time.Millisecond)
 	}
 }
